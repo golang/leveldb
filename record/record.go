@@ -71,8 +71,6 @@
 // next block and looks for the next full or first chunk.
 package record // import "github.com/golang/leveldb/record"
 
-// TODO: implement the recovery algorithm.
-
 // The C++ Level-DB code calls this the log, but it has been renamed to record
 // to avoid clashing with the standard log package, and because it is generally
 // useful outside of logging. The C++ code also uses the term "physical record"
@@ -82,6 +80,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 
 	"github.com/golang/leveldb/crc"
 )
@@ -107,6 +106,8 @@ type flusher interface {
 type Reader struct {
 	// r is the underlying reader.
 	r io.Reader
+	// rs is a ReadSeeker over r, if available.
+	rs io.ReadSeeker
 	// seq is the sequence number of the current record.
 	seq int
 	// buf[i:j] is the unread portion of the current chunk's payload.
@@ -117,6 +118,9 @@ type Reader struct {
 	n int
 	// started is whether Next has been called at all.
 	started bool
+	// inRecovery is true when Recover() has been called, but before
+	// the next successful chunk has been read.
+	inRecovery bool
 	// last is whether the current chunk is the last chunk of the record.
 	last bool
 	// err is any accumulated error.
@@ -127,9 +131,38 @@ type Reader struct {
 
 // NewReader returns a new reader.
 func NewReader(r io.Reader) *Reader {
+	rs, _ := r.(io.ReadSeeker)
 	return &Reader{
-		r: r,
+		r:  r,
+		rs: rs,
 	}
+}
+
+// Skips all blocks that are completely before offset.
+// Returns the new offset in the file if successful, error otherwise.
+func (r *Reader) SkipToInitialOffset(offset int64) (int64, error) {
+	if r.started {
+		return 0, errors.New("leveldb/record: can't SkipToInitialOffset() after Next() has been called")
+	}
+
+	if r.rs == nil {
+		return 0, errors.New("leveldb/record: underlying Reader doesn't implement io.ReadSeeker")
+	}
+
+	offsetInBlock := offset % blockSize
+	blockStartLocation := offset - offsetInBlock
+
+	// Don't search a block if we'd be in the trailer
+	if offsetInBlock > blockSize-6 {
+		offsetInBlock = 0
+		blockStartLocation += blockSize
+	}
+
+	if blockStartLocation > 0 {
+		return r.rs.Seek(blockStartLocation, os.SEEK_SET)
+	}
+
+	return 0, nil
 }
 
 // nextChunk sets r.buf[r.i:r.j] to hold the next chunk's payload, reading the
@@ -169,7 +202,7 @@ func (r *Reader) nextChunk(wantFirst bool) error {
 			r.last = chunkType == fullChunkType || chunkType == lastChunkType
 			return nil
 		}
-		if r.n < blockSize && r.started {
+		if r.n < blockSize && r.started && !r.inRecovery {
 			if r.j != r.n {
 				return io.ErrUnexpectedEOF
 			}
@@ -198,7 +231,41 @@ func (r *Reader) Next() (io.Reader, error) {
 		return nil, r.err
 	}
 	r.started = true
+	r.inRecovery = false
 	return singleReader{r, r.seq}, nil
+}
+
+// Attempt to recover from a corrupted record by continuing at the next block
+// boundary. Recover() clears internal error flags. Calling Recover() before
+// Next() raises an error, is itself an error. Recover() is only applicable for
+// data corruption issues. Calling recover if Next() returned io.EOF or
+// io.ErrUnexpectedEOF will result in an error.
+func (r *Reader) Recover() error {
+	switch r.err {
+	case nil:
+		return errors.New("leveldb/record no error condition exists to recover from")
+	case io.EOF, io.ErrUnexpectedEOF:
+		return errors.New("leveldb/record can't recover from io.EOF and/or io.UnexpectedEOF")
+	}
+
+	// After calling r.Recover(), we're effectively starting fresh, so we need to
+	// set r.inRecovery to true so r.Next() and r.nextChunk() proceed with the next block.
+	// We also set r.{i,j,n} = 0 and r.err = nil so we don't reparse the old block's data.
+	r.i, r.j, r.n = 0, 0, 0
+	r.err = nil
+	r.inRecovery = true
+
+	return nil
+}
+
+// If the underlying io.Reader implements io.ReadSeeker, return the offset at which the next
+// block will be read. This does not mean all data before the returned offset has been consumed
+// at the time CurrentOffset() was called.
+func (r *Reader) CurrentOffset() (int64, error) {
+	if r.rs != nil {
+		return r.rs.Seek(0, os.SEEK_CUR)
+	}
+	return 0, errors.New("leveldb/record: underlying Reader doesn't implement io.ReadSeeker")
 }
 
 type singleReader struct {
