@@ -335,8 +335,8 @@ func TestSkipToInitialOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2_data, err := ioutil.ReadAll(r2)
-	if bytes.Compare(r2_data, []byte(strings.Repeat("b", blockSize-headerSize))) != 0 {
+	r2Data, err := ioutil.ReadAll(r2)
+	if bytes.Compare(r2Data, []byte(strings.Repeat("b", blockSize-headerSize))) != 0 {
 		t.Fatal("Unexpected output in record 2's data")
 	}
 }
@@ -370,8 +370,8 @@ func TestBasicReadRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1_data, err := ioutil.ReadAll(r1)
-	if bytes.Compare(r1_data, []byte(strings.Repeat("a", blockSize-headerSize))) != 0 {
+	r1Data, err := ioutil.ReadAll(r1)
+	if bytes.Compare(r1Data, []byte(strings.Repeat("a", blockSize-headerSize))) != 0 {
 		t.Fatal("Unexpected output in record 1's data.")
 	}
 
@@ -461,8 +461,8 @@ func TestComplexReadRecovery(t *testing.T) {
 	if r3, err := r.Next(); err != nil {
 		t.Fatal(err)
 	} else {
-		r3_data, _ := ioutil.ReadAll(r3)
-		if bytes.Compare(r3_data, []byte(strings.Repeat("c", blockSize-headerSize))) != 0 {
+		r3Data, _ := ioutil.ReadAll(r3)
+		if bytes.Compare(r3Data, []byte(strings.Repeat("c", blockSize-headerSize))) != 0 {
 			t.Fatal("Unexpected output in record 3's data.")
 		}
 	}
