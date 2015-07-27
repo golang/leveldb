@@ -248,8 +248,8 @@ func (r *Reader) Recover() error {
 		return errors.New("leveldb/record can't recover from io.EOF and/or io.UnexpectedEOF")
 	}
 
-	// After calling r.Recover(), we're effectively starting fresh, so we need to
-	// set r.inRecovery to true so r.Next() and r.nextChunk() proceed with the next block.
+	// After calling r.Recover, we're effectively starting fresh, so we need to
+	// set r.inRecovery to true so r.Next and r.nextChunk proceed with the next block.
 	// We also set r.{i,j,n} = 0 and r.err = nil so we don't reparse the old block's data.
 	r.i, r.j, r.n = 0, 0, 0
 	r.err = nil
