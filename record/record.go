@@ -118,7 +118,7 @@ type Reader struct {
 	n int
 	// started is whether Next has been called at all.
 	started bool
-	// inRecovery is true when Recover() has been called, but before
+	// inRecovery is whether Recover has been called, but before
 	// the next successful chunk has been read.
 	inRecovery bool
 	// last is whether the current chunk is the last chunk of the record.
@@ -138,7 +138,7 @@ func NewReader(r io.Reader) *Reader {
 	}
 }
 
-// Skips all blocks that are completely before offset.
+// SkipToInitialOffset skips all blocks that are completely before offset.
 // Returns the new offset in the file if successful, error otherwise.
 func (r *Reader) SkipToInitialOffset(offset int64) (int64, error) {
 	if r.started {
@@ -235,10 +235,10 @@ func (r *Reader) Next() (io.Reader, error) {
 	return singleReader{r, r.seq}, nil
 }
 
-// Attempt to recover from a corrupted record by continuing at the next block
-// boundary. Recover() clears internal error flags. Calling Recover() before
-// Next() raises an error, is itself an error. Recover() is only applicable for
-// data corruption issues. Calling recover if Next() returned io.EOF or
+// Recover attempts to recover from a corrupted record by continuing at the
+// next block boundary. Recover clears internal error flags. Calling Recover
+// before Next raises an error, is itself an error. Recover is only applicable
+// for data corruption issues. Calling recover if Next returned io.EOF or
 // io.ErrUnexpectedEOF will result in an error.
 func (r *Reader) Recover() error {
 	switch r.err {
@@ -258,9 +258,10 @@ func (r *Reader) Recover() error {
 	return nil
 }
 
-// If the underlying io.Reader implements io.ReadSeeker, return the offset at which the next
-// block will be read. This does not mean all data before the returned offset has been consumed
-// at the time CurrentOffset() was called.
+// CurrentOffset returns the offset at which the next block will be read. This
+// is only applicable if the underlying io.Reader implements io.ReadSeeker. It
+// returns the offset at which the next block will be read. Note that it does
+// not mean that all data before the returned offset has been consumed.
 func (r *Reader) CurrentOffset() (int64, error) {
 	if r.rs != nil {
 		return r.rs.Seek(0, os.SEEK_CUR)
