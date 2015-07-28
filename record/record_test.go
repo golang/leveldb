@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 )
@@ -313,34 +314,6 @@ func TestStaleWriter(t *testing.T) {
 	}
 }
 
-func TestSkipToInitialOffset(t *testing.T) {
-	buf := new(bytes.Buffer)
-	w := NewWriter(buf)
-
-	for i := 0; i < 2; i++ {
-		if wRec, err := w.Next(); err != nil {
-			t.Fatal(err)
-		} else {
-			if _, err = wRec.Write([]byte(strings.Repeat(string(rune(97+i)), blockSize-headerSize))); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	w.Close()
-
-	// The first record should be read/processed just fine.
-	r := NewReader(bytes.NewReader(buf.Bytes()))
-	r.SkipToInitialOffset(blockSize + 10)
-	r2, err := r.Next()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r2Data, err := ioutil.ReadAll(r2)
-	if bytes.Compare(r2Data, []byte(strings.Repeat("b", blockSize-headerSize))) != 0 {
-		t.Fatal("Unexpected output in record 2's data")
-	}
-}
-
 func TestBasicReadRecovery(t *testing.T) {
 	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
@@ -365,7 +338,8 @@ func TestBasicReadRecovery(t *testing.T) {
 	rawBufSlice[blockSize+3] = 0xDE
 
 	// The first record should be read/processed just fine.
-	r := NewReader(bytes.NewReader(rawBufSlice))
+	underlyingReader := bytes.NewReader(rawBufSlice)
+	r := NewReader(underlyingReader)
 	r1, err := r.Next()
 	if err != nil {
 		t.Fatal(err)
@@ -391,11 +365,11 @@ func TestBasicReadRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	currentOffset, err := r.CurrentOffset()
-	if currentOffset != blockSize*2 {
-		t.Fatalf("After calling r.Recover() we expected r.CurrentOffset() to be %d, but received %d", blockSize*2, currentOffset)
-	} else if err != nil {
+	currentOffset, err := underlyingReader.Seek(0, os.SEEK_CUR)
+	if err != nil {
 		t.Fatal(err)
+	} else if currentOffset != blockSize*2 {
+		t.Fatalf("After calling r.Recover() we expected r.CurrentOffset() to be %d, but received %d", blockSize*2, currentOffset)
 	}
 
 	r3, err := r.Next()

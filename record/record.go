@@ -24,11 +24,12 @@
 //		records := record.NewReader(r)
 //		for {
 //			rec, err := records.Next()
-//			if err == io.EOF {
+//			if err == io.EOF || err == io.ErrUnexpectedEOF {
 //				break
 //			}
 //			if err != nil {
-//				return nil, err
+//				r.Recover()  // Skip corrupted records.
+//				continue
 //			}
 //			s, err := ioutil.ReadAll(rec)
 //			if err != nil {
@@ -80,7 +81,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
 
 	"github.com/golang/leveldb/crc"
 )
@@ -106,8 +106,6 @@ type flusher interface {
 type Reader struct {
 	// r is the underlying reader.
 	r io.Reader
-	// rs is a ReadSeeker over r, if available.
-	rs io.ReadSeeker
 	// seq is the sequence number of the current record.
 	seq int
 	// buf[i:j] is the unread portion of the current chunk's payload.
@@ -131,38 +129,9 @@ type Reader struct {
 
 // NewReader returns a new reader.
 func NewReader(r io.Reader) *Reader {
-	rs, _ := r.(io.ReadSeeker)
 	return &Reader{
-		r:  r,
-		rs: rs,
+		r: r,
 	}
-}
-
-// SkipToInitialOffset skips all blocks that are completely before offset.
-// Returns the new offset in the file if successful, error otherwise.
-func (r *Reader) SkipToInitialOffset(offset int64) (int64, error) {
-	if r.started {
-		return 0, errors.New("leveldb/record: can't SkipToInitialOffset() after Next() has been called")
-	}
-
-	if r.rs == nil {
-		return 0, errors.New("leveldb/record: underlying Reader doesn't implement io.ReadSeeker")
-	}
-
-	offsetInBlock := offset % blockSize
-	blockStartLocation := offset - offsetInBlock
-
-	// Don't search a block if we'd be in the trailer
-	if offsetInBlock > blockSize-6 {
-		offsetInBlock = 0
-		blockStartLocation += blockSize
-	}
-
-	if blockStartLocation > 0 {
-		return r.rs.Seek(blockStartLocation, os.SEEK_SET)
-	}
-
-	return 0, nil
 }
 
 // nextChunk sets r.buf[r.i:r.j] to hold the next chunk's payload, reading the
@@ -256,17 +225,6 @@ func (r *Reader) Recover() error {
 	r.inRecovery = true
 
 	return nil
-}
-
-// CurrentOffset returns the offset at which the next block will be read. This
-// is only applicable if the underlying io.Reader implements io.ReadSeeker. It
-// returns the offset at which the next block will be read. Note that it does
-// not mean that all data before the returned offset has been consumed.
-func (r *Reader) CurrentOffset() (int64, error) {
-	if r.rs != nil {
-		return r.rs.Seek(0, os.SEEK_CUR)
-	}
-	return 0, errors.New("leveldb/record: underlying Reader doesn't implement io.ReadSeeker")
 }
 
 type singleReader struct {
