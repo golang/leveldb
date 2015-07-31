@@ -24,16 +24,30 @@
 //		records := record.NewReader(r)
 //		for {
 //			rec, err := records.Next()
-//			if err == io.EOF || err == io.ErrUnexpectedEOF {
-//				break
-//			}
 //			if err != nil {
-//				r.Recover()  // Skip corrupted records.
+//				if err == io.EOF || err == io.ErrUnexpectedEOF {
+//					break
+//				}
+//				log.Printf("recovering from %v", err)
+//				err = r.Recover()
+//				if err != nil {
+//					log.Printf("unable to recover from %v", err)
+//					break
+//				}
 //				continue
 //			}
 //			s, err := ioutil.ReadAll(rec)
 //			if err != nil {
-//				return nil, err
+//				if err == io.EOF || err == io.ErrUnexpectedEOF {
+//					break
+//				}
+//				log.Printf("recovering from %v", err)
+//				err = r.Recover()
+//				if err != nil {
+//					log.Printf("unable to recover from %v", err)
+//					break
+//				}
+//				continue
 //			}
 //			ss = append(ss, string(s))
 //		}
@@ -206,9 +220,10 @@ func (r *Reader) Next() (io.Reader, error) {
 
 // Recover attempts to recover from a corrupted record by continuing at the
 // next block boundary. Recover clears internal error flags. Calling Recover
-// before Next raises an error, is itself an error. Recover is only applicable
-// for data corruption issues. Calling recover if Next returned io.EOF or
-// io.ErrUnexpectedEOF will result in an error.
+// before Next, Read, and in practice, ioutil.ReadAll, raises an error, is
+// itself an error. Recover is only applicable for data corruption issues.
+// Calling recover if the returned error is io.EOF or io.ErrUnexpectedEOF will
+// result in Recover returning an error.
 func (r *Reader) Recover() error {
 	switch r.err {
 	case nil:
@@ -223,7 +238,7 @@ func (r *Reader) Recover() error {
 	r.i, r.j, r.n = 0, 0, 0
 	r.err = nil
 	r.inRecovery = true
-
+	r.seq++ // Invalidate any outstanding singleReader.
 	return nil
 }
 
