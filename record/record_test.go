@@ -315,16 +315,22 @@ func TestStaleWriter(t *testing.T) {
 }
 
 func TestBasicReadRecovery(t *testing.T) {
+	records := [][]byte{
+		[]byte(strings.Repeat("a", blockSize-headerSize)),
+		[]byte(strings.Repeat("b", blockSize-headerSize)),
+		[]byte(strings.Repeat("c", blockSize-headerSize)),
+	}
+
 	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
 
-	for i := 0; i < 3; i++ {
-		if wRec, err := w.Next(); err != nil {
+	for i := 0; i < len(records); i++ {
+		wRec, err := w.Next()
+		if err != nil {
 			t.Fatal(err)
-		} else {
-			if _, err = wRec.Write([]byte(strings.Repeat(string(rune(97+i)), blockSize-headerSize))); err != nil {
-				t.Fatal(err)
-			}
+		}
+		if _, err = wRec.Write(records[i]); err != nil {
+			t.Fatal(err)
 		}
 	}
 	w.Close() // Finalize the last record.
@@ -332,10 +338,10 @@ func TestBasicReadRecovery(t *testing.T) {
 	rawBufSlice := buf.Bytes()
 
 	// Corrupt the checksum of the second record in our file.
-	rawBufSlice[blockSize] = 0xEF
-	rawBufSlice[blockSize+1] = 0xBE
-	rawBufSlice[blockSize+2] = 0xAD
-	rawBufSlice[blockSize+3] = 0xDE
+	rawBufSlice[blockSize+0] = 0xef
+	rawBufSlice[blockSize+1] = 0xbe
+	rawBufSlice[blockSize+2] = 0xad
+	rawBufSlice[blockSize+3] = 0xde
 
 	// The first record should be read/processed just fine.
 	underlyingReader := bytes.NewReader(rawBufSlice)
@@ -344,8 +350,13 @@ func TestBasicReadRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	r1Data, err := ioutil.ReadAll(r1)
-	if bytes.Compare(r1Data, []byte(strings.Repeat("a", blockSize-headerSize))) != 0 {
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(r1Data, records[0]) {
 		t.Fatal("Unexpected output in record 1's data.")
 	}
 
@@ -369,7 +380,7 @@ func TestBasicReadRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if currentOffset != blockSize*2 {
-		t.Fatalf("After calling r.Recover() we expected r.CurrentOffset() to be %d, but received %d", blockSize*2, currentOffset)
+		t.Fatalf("After calling r.Recover we expected the underlying cursor offset to be %d, but received %d", blockSize*2, currentOffset)
 	}
 
 	r3, err := r.Next()
@@ -382,23 +393,27 @@ func TestBasicReadRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if bytes.Compare(data, []byte(strings.Repeat("c", blockSize-headerSize))) != 0 {
+	if !bytes.Equal(data, records[2]) {
 		t.Fatal("Unexpected output in recovered data.")
 	}
 }
 
 func TestComplexReadRecovery(t *testing.T) {
+	// The first record will be blockSize * 3 bytes long. Since each block has a
+	// 6 byte header, the first record will roll over into 4 blocks.
+	records := [][]byte{
+		[]byte(strings.Repeat("a", blockSize*3)),
+		[]byte(strings.Repeat("b", blockSize-headerSize)),
+		[]byte(strings.Repeat("c", blockSize-headerSize)),
+	}
 	buf := new(bytes.Buffer)
 
 	w := NewWriter(buf)
-	// The first record will be blockSize * 3 bytes long. Since each block has a
-	// 6 byte header, the first record will roll over into 4 blocks.
-	recSizes := []int{blockSize * 3, blockSize - headerSize, blockSize - headerSize}
 	for i := 0; i < 3; i++ {
 		if wRec, err := w.Next(); err != nil {
 			t.Fatal(err)
 		} else {
-			if _, err = wRec.Write([]byte(strings.Repeat(string(rune(97+i)), recSizes[i]))); err != nil {
+			if _, err = wRec.Write(records[i]); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -407,10 +422,10 @@ func TestComplexReadRecovery(t *testing.T) {
 	rawBufSlice := buf.Bytes()
 
 	// Now corrupt the checksum for the portion of the first record that exists in the 4th block.
-	rawBufSlice[blockSize*3] = 0xEF
-	rawBufSlice[blockSize*3+1] = 0xBE
-	rawBufSlice[blockSize*3+2] = 0xAD
-	rawBufSlice[blockSize*3+3] = 0xDE
+	rawBufSlice[blockSize*3+0] = 0xef
+	rawBufSlice[blockSize*3+1] = 0xbe
+	rawBufSlice[blockSize*3+2] = 0xad
+	rawBufSlice[blockSize*3+3] = 0xde
 	r := NewReader(bytes.NewReader(rawBufSlice))
 
 	// The first record should fail, but only when we read deeper beyond the first block.
@@ -426,7 +441,10 @@ func TestComplexReadRecovery(t *testing.T) {
 	}
 
 	// Recover from the checksum mismatch
-	_ = r.Recover()
+	err := r.Recover()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// All of the data in the second record is lost because the first record shared a partial
 	// block with it. The second record also overlapped into the block with the third record.
@@ -436,13 +454,13 @@ func TestComplexReadRecovery(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		r3Data, _ := ioutil.ReadAll(r3)
-		if bytes.Compare(r3Data, []byte(strings.Repeat("c", blockSize-headerSize))) != 0 {
+		if !bytes.Equal(r3Data, records[2]) {
 			t.Fatal("Unexpected output in record 3's data.")
 		}
 	}
 
 	// Pointless recovery attempt should return an error.
-	err := r.Recover()
+	err = r.Recover()
 	if err == nil {
 		t.Fatal("Recovery attempt should have failed")
 	}
