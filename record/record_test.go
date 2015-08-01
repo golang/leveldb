@@ -363,7 +363,7 @@ func TestBasicReadRecovery(t *testing.T) {
 	// This record should present problems since the checksum is wrong.
 	_, err = r.Next()
 	if err == nil {
-		t.Fatal(err)
+		t.Fatal("Expected an error while reading a corrupted record.")
 	}
 
 	if !strings.Contains(err.Error(), "checksum mismatch") {
@@ -379,7 +379,8 @@ func TestBasicReadRecovery(t *testing.T) {
 	currentOffset, err := underlyingReader.Seek(0, os.SEEK_CUR)
 	if err != nil {
 		t.Fatal(err)
-	} else if currentOffset != blockSize*2 {
+	}
+	if currentOffset != blockSize*2 {
 		t.Fatalf("After calling r.Recover we expected the underlying cursor offset to be %d, but received %d", blockSize*2, currentOffset)
 	}
 
