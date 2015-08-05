@@ -367,14 +367,11 @@ func TestBasicReadRecovery(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(), "checksum mismatch") {
-		t.Fatalf("Unexpected error returned: %s", err.Error())
+		t.Fatalf("Unexpected error returned: %s", err)
 	}
 
 	// Now attempt to recover from the checksum error we intentionally caused.
-	err = r.Recover()
-	if err != nil {
-		t.Fatal(err)
-	}
+	r.Recover()
 
 	currentOffset, err := underlyingReader.Seek(0, os.SEEK_CUR)
 	if err != nil {
@@ -411,12 +408,13 @@ func TestComplexReadRecovery(t *testing.T) {
 
 	w := NewWriter(buf)
 	for i := 0; i < 3; i++ {
-		if wRec, err := w.Next(); err != nil {
+		wRec, err := w.Next()
+		if err != nil {
 			t.Fatal(err)
-		} else {
-			if _, err = wRec.Write(records[i]); err != nil {
-				t.Fatal(err)
-			}
+		}
+
+		if _, err = wRec.Write(records[i]); err != nil {
+			t.Fatal(err)
 		}
 	}
 	w.Close() // Finalize the last record.
@@ -437,15 +435,12 @@ func TestComplexReadRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !strings.Contains(err.Error(), "checksum mismatch") {
-			t.Fatalf("Unexpected error returned: %s", err.Error())
+			t.Fatalf("Unexpected error returned: %s", err)
 		}
 	}
 
 	// Recover from the checksum mismatch
-	err := r.Recover()
-	if err != nil {
-		t.Fatal(err)
-	}
+	r.Recover()
 
 	// All of the data in the second record is lost because the first record shared a partial
 	// block with it. The second record also overlapped into the block with the third record.
@@ -458,11 +453,5 @@ func TestComplexReadRecovery(t *testing.T) {
 		if !bytes.Equal(r3Data, records[2]) {
 			t.Fatal("Unexpected output in record 3's data.")
 		}
-	}
-
-	// Pointless recovery attempt should return an error.
-	err = r.Recover()
-	if err == nil {
-		t.Fatal("Recovery attempt should have failed")
 	}
 }

@@ -25,28 +25,20 @@
 //		for {
 //			rec, err := records.Next()
 //			if err != nil {
-//				if err == io.EOF || err == io.ErrUnexpectedEOF {
+//				if err == io.EOF {
 //					break
 //				}
 //				log.Printf("recovering from %v", err)
-//				err = r.Recover()
-//				if err != nil {
-//					log.Printf("unable to recover from %v", err)
-//					break
-//				}
+//				r.Recover()
 //				continue
 //			}
 //			s, err := ioutil.ReadAll(rec)
 //			if err != nil {
-//				if err == io.EOF || err == io.ErrUnexpectedEOF {
+//				if err == io.EOF {
 //					break
 //				}
 //				log.Printf("recovering from %v", err)
-//				err = r.Recover()
-//				if err != nil {
-//					log.Printf("unable to recover from %v", err)
-//					break
-//				}
+//				r.Recover()
 //				continue
 //			}
 //			ss = append(ss, string(s))
@@ -218,20 +210,13 @@ func (r *Reader) Next() (io.Reader, error) {
 	return singleReader{r, r.seq}, nil
 }
 
-// Recover attempts to recover from a corrupted record by continuing at the
-// next block boundary. Recover clears internal error flags. Calling Recover
-// before Next, Read, and in practice, ioutil.ReadAll, raises an error, is
-// itself an error. Recover is only applicable for data corruption issues.
-// Calling recover if the returned error is io.EOF or io.ErrUnexpectedEOF will
-// result in Recover returning an error.
-func (r *Reader) Recover() error {
-	switch r.err {
-	case nil:
-		return errors.New("leveldb/record no error condition exists to recover from")
-	case io.EOF, io.ErrUnexpectedEOF:
-		return errors.New("leveldb/record can't recover from io.EOF and/or io.UnexpectedEOF")
-	}
-
+// Recover clears any errors read so far, so that calling Next will start
+// reading from the next good 32KiB block. If there are no such blocks, Next
+// will return io.EOF.
+//
+// Recover also marks the current reader, the one most recently returned by
+// Next, as stale.
+func (r *Reader) Recover() {
 	// After calling r.Recover, we're effectively starting fresh, so we need to
 	// set r.inRecovery to true so r.Next and r.nextChunk proceed with the next block.
 	// We also set r.{i,j,n} = 0 and r.err = nil so we don't reparse the old block's data.
@@ -239,7 +224,7 @@ func (r *Reader) Recover() error {
 	r.err = nil
 	r.inRecovery = true
 	r.seq++ // Invalidate any outstanding singleReader.
-	return nil
+	return
 }
 
 type singleReader struct {
