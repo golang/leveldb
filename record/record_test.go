@@ -448,10 +448,10 @@ func TestComplexReadRecovery(t *testing.T) {
 	// start parsing the third record which we verify below.
 	if r3, err := r.Next(); err != nil {
 		t.Fatal(err)
-	} else {
-		r3Data, _ := ioutil.ReadAll(r3)
-		if !bytes.Equal(r3Data, records[2]) {
-			t.Fatal("Unexpected output in record 3's data.")
-		}
+	}
+
+	r3Data, _ := ioutil.ReadAll(r3)
+	if !bytes.Equal(r3Data, records[2]) {
+		t.Fatal("Unexpected output in record 3's data.")
 	}
 }
