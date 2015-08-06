@@ -24,19 +24,19 @@
 //		records := record.NewReader(r)
 //		for {
 //			rec, err := records.Next()
+//			if err == io.EOF {
+//				break
+//			}
 //			if err != nil {
-//				if err == io.EOF {
-//					break
-//				}
 //				log.Printf("recovering from %v", err)
 //				r.Recover()
 //				continue
 //			}
 //			s, err := ioutil.ReadAll(rec)
+//			if err == io.EOF {
+//				break
+//			}
 //			if err != nil {
-//				if err == io.EOF {
-//					break
-//				}
 //				log.Printf("recovering from %v", err)
 //				r.Recover()
 //				continue
@@ -122,9 +122,6 @@ type Reader struct {
 	n int
 	// started is whether Next has been called at all.
 	started bool
-	// inRecovery is whether Recover has been called, but before
-	// the next successful chunk has been read.
-	inRecovery bool
 	// last is whether the current chunk is the last chunk of the record.
 	last bool
 	// err is any accumulated error.
@@ -177,7 +174,7 @@ func (r *Reader) nextChunk(wantFirst bool) error {
 			r.last = chunkType == fullChunkType || chunkType == lastChunkType
 			return nil
 		}
-		if r.n < blockSize && r.started && !r.inRecovery {
+		if r.n < blockSize && r.started {
 			if r.j != r.n {
 				return io.ErrUnexpectedEOF
 			}
@@ -189,7 +186,6 @@ func (r *Reader) nextChunk(wantFirst bool) error {
 		}
 		r.i, r.j, r.n = 0, 0, n
 	}
-	panic("unreachable")
 }
 
 // Next returns a reader for the next record. It returns io.EOF if there are no
@@ -206,7 +202,6 @@ func (r *Reader) Next() (io.Reader, error) {
 		return nil, r.err
 	}
 	r.started = true
-	r.inRecovery = false
 	return singleReader{r, r.seq}, nil
 }
 
@@ -217,13 +212,11 @@ func (r *Reader) Next() (io.Reader, error) {
 // Recover also marks the current reader, the one most recently returned by
 // Next, as stale.
 func (r *Reader) Recover() {
-	// After calling r.Recover, we're effectively starting fresh, so we need to
-	// set r.inRecovery to true so r.Next and r.nextChunk proceed with the next block.
-	// We also set r.{i,j,n} = 0 and r.err = nil so we don't reparse the old block's data.
-	r.i, r.j, r.n = 0, 0, 0
 	r.err = nil
-	r.inRecovery = true
-	r.seq++ // Invalidate any outstanding singleReader.
+	// Discard the rest of the current block.
+	r.i, r.j, r.last = r.n, r.n, false
+	// Invalidate any outstanding singleReader.
+	r.seq++
 	return
 }
 
