@@ -33,9 +33,6 @@
 //				continue
 //			}
 //			s, err := ioutil.ReadAll(rec)
-//			if err == io.EOF {
-//				break
-//			}
 //			if err != nil {
 //				log.Printf("recovering from %v", err)
 //				r.Recover()

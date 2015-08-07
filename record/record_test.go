@@ -333,11 +333,10 @@ func TestBasicRecover(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w.Close() // Finalize the last record.
-
-	rawBufSlice := buf.Bytes()
+	w.Close()
 
 	// Corrupt the checksum of the second record in our file.
+	rawBufSlice := buf.Bytes()
 	rawBufSlice[blockSize+0] = 0xef
 	rawBufSlice[blockSize+1] = 0xbe
 	rawBufSlice[blockSize+2] = 0xad
@@ -404,8 +403,8 @@ func TestComplexRecover(t *testing.T) {
 		[]byte(strings.Repeat("b", blockSize-headerSize)),
 		[]byte(strings.Repeat("c", blockSize-headerSize)),
 	}
-	buf := new(bytes.Buffer)
 
+	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
 	for i := 0; i < 3; i++ {
 		wRec, err := w.Next()
@@ -418,25 +417,28 @@ func TestComplexRecover(t *testing.T) {
 		}
 	}
 	w.Close()
-	rawBufSlice := buf.Bytes()
 
 	// Now corrupt the checksum for the portion of the first record that exists in the 4th block.
+	rawBufSlice := buf.Bytes()
 	rawBufSlice[blockSize*3+0] = 0xef
 	rawBufSlice[blockSize*3+1] = 0xbe
 	rawBufSlice[blockSize*3+2] = 0xad
 	rawBufSlice[blockSize*3+3] = 0xde
-	r := NewReader(bytes.NewReader(rawBufSlice))
 
 	// The first record should fail, but only when we read deeper beyond the first block.
-	if r0, err := r.Next(); err == nil {
-		// err below should reference a checksum mismatch.
-		_, err := ioutil.ReadAll(r0)
-		if err == nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(err.Error(), "checksum mismatch") {
-			t.Fatalf("Unexpected error returned: %s", err)
-		}
+	r := NewReader(bytes.NewReader(rawBufSlice))
+	r0, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// err below should reference a checksum mismatch.
+	_, err = ioutil.ReadAll(r0)
+	if err == nil {
+		t.Fatal("Exptected a checksum mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("Unexpected error returned: %s", err)
 	}
 
 	// Recover from the checksum mismatch.
