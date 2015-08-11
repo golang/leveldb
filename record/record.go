@@ -119,6 +119,8 @@ type Reader struct {
 	n int
 	// started is whether Next has been called at all.
 	started bool
+	// inRecovery is true when recovering from corruption.
+	inRecovery bool
 	// last is whether the current chunk is the last chunk of the record.
 	last bool
 	// err is any accumulated error.
@@ -158,9 +160,19 @@ func (r *Reader) nextChunk(wantFirst bool) error {
 			r.i = r.j + headerSize
 			r.j = r.j + headerSize + int(length)
 			if r.j > r.n {
+				if r.inRecovery {
+					// When inRecovery, continue until a good chunk.
+					r.Recover()
+					continue
+				}
 				return errors.New("leveldb/record: invalid chunk (length overflows block)")
 			}
 			if checksum != crc.New(r.buf[r.i-1:r.j]).Value() {
+				if r.inRecovery {
+					// When inRecovery, continue until a good chunk.
+					r.Recover()
+					continue
+				}
 				return errors.New("leveldb/record: invalid chunk (checksum mismatch)")
 			}
 			if wantFirst {
@@ -169,9 +181,10 @@ func (r *Reader) nextChunk(wantFirst bool) error {
 				}
 			}
 			r.last = chunkType == fullChunkType || chunkType == lastChunkType
+			r.inRecovery = false
 			return nil
 		}
-		if r.n < blockSize && r.started {
+		if r.n < blockSize && r.started && !r.inRecovery {
 			if r.j != r.n {
 				return io.ErrUnexpectedEOF
 			}
@@ -209,6 +222,7 @@ func (r *Reader) Next() (io.Reader, error) {
 // Recover also marks the current reader, the one most recently returned by
 // Next, as stale.
 func (r *Reader) Recover() {
+	r.inRecovery = true
 	r.err = nil
 	// Discard the rest of the current block.
 	r.i, r.j, r.last = r.n, r.n, false
