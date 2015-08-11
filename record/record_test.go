@@ -397,16 +397,18 @@ func TestBasicRecover(t *testing.T) {
 
 func TestComplexRecover(t *testing.T) {
 	// The first record will be blockSize * 3 bytes long. Since each block has a
-	// 6 byte header, the first record will roll over into 4 blocks.
+	// 7 byte header, the first record will roll over into 4 blocks.
 	records := [][]byte{
-		[]byte(strings.Repeat("a", blockSize*3)),
-		[]byte(strings.Repeat("b", blockSize-headerSize)),
-		[]byte(strings.Repeat("c", blockSize-headerSize)),
+		[]byte(strings.Repeat("a", blockSize*3)),          // Consume 3 whole blocks + 1 fractional block.
+		[]byte(strings.Repeat("b", 32733)),                // Consume the remainder of the 4th block.
+		[]byte(strings.Repeat("c", blockSize-headerSize)), // Consume the 5th block.
+		[]byte(strings.Repeat("d", blockSize-headerSize)), // Consume the 6th block.
+		[]byte(strings.Repeat("e", blockSize-headerSize)), // Consume the 7th block.
 	}
 
 	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < len(records); i++ {
 		wRec, err := w.Next()
 		if err != nil {
 			t.Fatal(err)
@@ -424,6 +426,16 @@ func TestComplexRecover(t *testing.T) {
 	rawBufSlice[blockSize*3+1] = 0xbe
 	rawBufSlice[blockSize*3+2] = 0xad
 	rawBufSlice[blockSize*3+3] = 0xde
+
+	// Now corrupt the two blocks in a row that correspond to records[2] and records[3].
+	rawBufSlice[blockSize*4+0] = 0xef
+	rawBufSlice[blockSize*4+1] = 0xbe
+	rawBufSlice[blockSize*4+2] = 0xad
+	rawBufSlice[blockSize*4+3] = 0xde
+	rawBufSlice[blockSize*5+0] = 0xef
+	rawBufSlice[blockSize*5+1] = 0xbe
+	rawBufSlice[blockSize*5+2] = 0xad
+	rawBufSlice[blockSize*5+3] = 0xde
 
 	// The first record should fail, but only when we read deeper beyond the first block.
 	r := NewReader(bytes.NewReader(rawBufSlice))
@@ -445,16 +457,15 @@ func TestComplexRecover(t *testing.T) {
 	r.Recover()
 
 	// All of the data in the second record is lost because the first record shared a partial
-	// block with it. The second record also overlapped into the block with the third record.
-	// Recovery was able to jump to that block, skipping over the end of the second record and
-	// start parsing the third record which we verify below.
-	r2, err := r.Next()
+	// block with it. The following two records have corrupted checksums as well. So the call
+	// above to r.Recover above should result in r.Next() being a reader to the 5th record.
+	r4, err := r.Next()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	r2Data, _ := ioutil.ReadAll(r2)
-	if !bytes.Equal(r2Data, records[2]) {
-		t.Fatal("Unexpected output in r2's data")
+	r4Data, _ := ioutil.ReadAll(r4)
+	if !bytes.Equal(r4Data, records[4]) {
+		t.Fatal("Unexpected output in r4's data")
 	}
 }
