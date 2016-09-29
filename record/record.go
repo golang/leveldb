@@ -243,7 +243,7 @@ func (r *Reader) Recover() {
 // first chunk header starts at the given offset in the underlying io.Reader. Its behavior is
 // undefined if the argument given is not such an offset, as the bytes at that offset may
 // coincidentally appear to be a valid header. The offset is always relative to the start of the
-// io.Reader, thus negative values result an error.
+// io.Reader, thus negative values result in an error.
 
 // It returns ErrNotAnIOSeeker if the underlying io.Reader does not also implement io.Seeker.
 func (r *Reader) SeekRecord(offset int64) error {
