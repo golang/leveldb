@@ -738,7 +738,7 @@ func TestSeekRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seeking to an invalid chunk boundary isn't an error")
 	}
-	if _, err = r.Next(); err != nil {
+	if _, err = r.Next(); err == nil {
 		t.Fatalf("Expected an error jumping to an invalid chunk boundary")
 	}
 }

@@ -263,7 +263,7 @@ func (r *Reader) SeekRecord(offset int64) error {
 
 	// Only seek to an exact block offset.
 	c := int(offset & blockSizeMask)
-	if _, r.err = s.Seek(offset &^ blockSizeMask, io.SeekStart); r.err != nil {
+	if _, r.err = s.Seek(offset&^blockSizeMask, io.SeekStart); r.err != nil {
 		return r.err
 	}
 
