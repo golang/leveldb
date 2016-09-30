@@ -676,17 +676,16 @@ func TestSeekRecord(t *testing.T) {
 		t.Fatalf("Unexpected output in record 1's data, got %v want %v", rData, recs.records[1])
 	}
 
-	// Seek to 3 bytes into the second block, which is still in the middle of the first record, but not
-	// at a valid chunk boundary.
+	// Seek 3 bytes into the second block, which is still in the middle of the first record, but not
+	// at a valid chunk boundary. Should result in an error upon calling r.Next.
 	err = r.SeekRecord(blockSize + 3)
 	if err != nil {
 		t.Fatalf("SeekRecord: %v", err)
 	}
-
 	if _, err = r.Next(); err == nil {
-		t.Fatalf("Unexpected lack of error calling SeekRecord to a bad offset")
+		t.Fatalf("Expected an error seeking to an invalid chunk boundary")
 	}
-	r.Recover() // Recover from the faux error just generated.
+	r.Recover()
 
 	// Seek to the fifth block and verify all records can be read as appropriate.
 	err = r.SeekRecord(blockSize * 4)
@@ -732,15 +731,6 @@ func TestSeekRecord(t *testing.T) {
 		t.Fatalf("SeekRecord: %v", err)
 	}
 	check(2)
-
-	// Seek to an invalid chunk boundary. Should result in an error upon calling r.Next.
-	err = r.SeekRecord(blockSize + 3)
-	if err != nil {
-		t.Fatalf("Seeking to an invalid chunk boundary isn't an error")
-	}
-	if _, err = r.Next(); err == nil {
-		t.Fatalf("Expected an error jumping to an invalid chunk boundary")
-	}
 }
 
 func TestLastRecordOffset(t *testing.T) {
