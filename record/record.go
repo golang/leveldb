@@ -105,6 +105,9 @@ const (
 var (
 	// ErrNotAnIOSeeker is returned if the io.Reader underlying a Reader does not implement io.Seeker.
 	ErrNotAnIOSeeker = errors.New("leveldb/record: reader does not implement io.Seeker")
+
+	// ErrNoLastRecord is returned if LastRecordOffset is called and there is no previous record.
+	ErrNoLastRecord = errors.New("leveldb/record: no last record exists")
 )
 
 type flusher interface {
@@ -239,17 +242,24 @@ func (r *Reader) Recover() {
 	return
 }
 
-// SeekRecord seeks in the underlying io.Reader such that calling r.Next returns
-// the record whose first chunk header starts at the given offset in the
-// underlying io.Reader. If there is an unrecovered error, the caller should
-// call Recover before calling SeekRecord. SeekRecord will clear the pending
-// error. Its behavior is undefined if the argument given is not such an offset,
-// as the bytes at that offset may coincidentally appear to be a valid header.
-// The offset is always relative to the start of the io.Reader, thus negative
-// values result in an error.
+// SeekRecord seeks in the underlying io.Reader such that calling r.Next
+// returns the record whose first chunk header starts at the provided offset.
+// Its behavior is undefined if the argument given is not such an offset, as
+// the bytes at that offset may coincidentally appear to be a valid header.
 //
-// It returns ErrNotAnIOSeeker if the underlying io.Reader does not also
-// implement io.Seeker.
+// It returns ErrNotAnIOSeeker if the underlying io.Reader does not implement
+// io.Seeker.
+//
+// SeekRecord will fail and return an error if the Reader previously
+// encountered an error, including io.EOF. Such errors can be cleared by
+// calling Recover. Calling SeekRecord after Recover will make calling Next
+// return the record at the given offset, instead of the record at the next
+// good 32KiB block as Recover normally would. Calling SeekRecord before
+// Recover has no effect on Recover's semantics other than changing the
+// starting point for determining the next good 32KiB block.
+//
+// The offset is always relative to the start of the underlying io.Reader, so
+// negative values will result in an error as per io.Seeker.
 func (r *Reader) SeekRecord(offset int64) error {
 	r.seq++
 	if r.err != nil {
@@ -269,7 +279,7 @@ func (r *Reader) SeekRecord(offset int64) error {
 
 	// Clear the state of the internal reader.
 	r.i, r.j, r.n = 0, 0, 0
-	r.recovering, r.started, r.last = false, false, false
+	r.started, r.recovering, r.last = false, false, false
 	if r.err = r.nextChunk(false); r.err != nil {
 		return r.err
 	}
@@ -324,12 +334,12 @@ type Writer struct {
 	// baseOffset is the base offset in w at which writing started. If
 	// w implements io.Seeker, it's relative to the start of w, 0 otherwise.
 	baseOffset int64
-	// blockNumber is the zero based block number currently represented by buf.
+	// blockNumber is the zero based block number currently held in buf.
 	blockNumber int64
-	// lastRecordOffset is the offset in w at which that the last record was
-	// written (including chunk header). It is a relative offset to
-	// baseOffset, thus the absolute offset of the last record is baseOffset +
-	// lastRecordOffset.
+	// lastRecordOffset is the offset in w where the last record was
+	// written (including the chunk header). It is a relative offset to
+	// baseOffset, thus the absolute offset of the last record is
+	// baseOffset + lastRecordOffset.
 	lastRecordOffset int64
 	// first is whether the current chunk is the first chunk of the record.
 	first bool
@@ -353,9 +363,10 @@ func NewWriter(w io.Writer) *Writer {
 		}
 	}
 	return &Writer{
-		w:          w,
-		f:          f,
-		baseOffset: o,
+		w:                w,
+		f:                f,
+		baseOffset:       o,
+		lastRecordOffset: -1,
 	}
 }
 
@@ -468,9 +479,15 @@ func (w *Writer) Next() (io.Writer, error) {
 // was initially at the zero position when passed to NewWriter. Otherwise, the
 // return value is a relative offset, being the number of bytes written between
 // the NewWriter call and any records written prior to the last record.
+//
+// If there is no last record, i.e. nothing was written, LastRecordOffset will
+// return ErrNoLastRecord.
 func (w *Writer) LastRecordOffset() (int64, error) {
 	if w.err != nil {
 		return 0, w.err
+	}
+	if w.lastRecordOffset < 0 {
+		return 0, ErrNoLastRecord
 	}
 	return w.lastRecordOffset, nil
 }

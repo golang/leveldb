@@ -694,7 +694,7 @@ func TestSeekRecord(t *testing.T) {
 		t.Fatalf("SeekRecord: %v", err)
 	}
 
-	recLooper := func(i int) {
+	check := func(i int) {
 		for ; i < len(recs.records); i++ {
 			rec, err := r.Next()
 			if err != nil {
@@ -707,14 +707,14 @@ func TestSeekRecord(t *testing.T) {
 			}
 		}
 	}
-	recLooper(2)
+	check(2)
 
 	// Seek back to the fourth block, and read all subsequent records and verify them.
 	err = r.SeekRecord(blockSize * 3)
 	if err != nil {
 		t.Fatalf("SeekRecord: %v", err)
 	}
-	recLooper(1)
+	check(1)
 
 	// Now seek past the end of the file and verify it causes an error.
 	err = r.SeekRecord(1 << 20)
@@ -731,7 +731,7 @@ func TestSeekRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SeekRecord: %v", err)
 	}
-	recLooper(2)
+	check(2)
 
 	// Seek to an invalid chunk boundary. Should result in an error upon calling r.Next.
 	err = r.SeekRecord(blockSize + 3)
@@ -765,5 +765,37 @@ func TestLastRecordOffset(t *testing.T) {
 		if want := wants[i]; got != want {
 			t.Errorf("record #%d: got %d, want %d", i, got, want)
 		}
+	}
+}
+
+func TestNoLastRecordOffset(t *testing.T) {
+	buf := new(bytes.Buffer)
+	w := NewWriter(buf)
+
+	if _, err := w.LastRecordOffset(); err != ErrNoLastRecord {
+		t.Fatalf("Expected ErrNoLastRecord, got: %v", err)
+	}
+
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := w.LastRecordOffset(); err != ErrNoLastRecord {
+		t.Fatal("LastRecordOffset: got: %v, want ErrNoLastRecord", err)
+	}
+
+	writer, err := w.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := writer.Write([]byte("testrecord")); err != nil {
+		t.Fatal(err)
+	}
+
+	if off, err := w.LastRecordOffset(); err != nil {
+		t.Fatalf("LastRecordOffset: %v", err)
+	} else if off != 0 {
+		t.Fatalf("LastRecordOffset: got %d, want 0", off)
 	}
 }
