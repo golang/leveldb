@@ -694,35 +694,27 @@ func TestSeekRecord(t *testing.T) {
 		t.Fatalf("SeekRecord: %v", err)
 	}
 
-	for i := 2; i < len(recs.records); i++ {
-		rec, err := r.Next()
-		if err != nil {
-			t.Fatalf("Next: %v", err)
-		}
+	recLooper := func(i int) {
+		for ; i < len(recs.records); i++ {
+			rec, err := r.Next()
+			if err != nil {
+				t.Fatalf("Next: %v", err)
+			}
 
-		rData, _ := ioutil.ReadAll(rec)
-		if !bytes.Equal(rData, recs.records[i]) {
-			t.Fatalf("Unexpected output in record #%d's data, got %v want %v", i, rData, recs.records[i])
+			rData, _ := ioutil.ReadAll(rec)
+			if !bytes.Equal(rData, recs.records[i]) {
+				t.Fatalf("Unexpected output in record #%d's data, got %v want %v", i, rData, recs.records[i])
+			}
 		}
 	}
+	recLooper(2)
 
 	// Seek back to the fourth block, and read all subsequent records and verify them.
 	err = r.SeekRecord(blockSize * 3)
 	if err != nil {
 		t.Fatalf("SeekRecord: %v", err)
 	}
-
-	for i := 1; i < len(recs.records); i++ {
-		rec, err := r.Next()
-		if err != nil {
-			t.Fatalf("Next: %v", err)
-		}
-
-		rData, _ := ioutil.ReadAll(rec)
-		if !bytes.Equal(rData, recs.records[i]) {
-			t.Fatalf("Unexpected output in record #%d's data, got %v want %v", i, rData, recs.records[i])
-		}
-	}
+	recLooper(1)
 
 	// Now seek past the end of the file and verify it causes an error.
 	err = r.SeekRecord(1 << 20)
@@ -739,17 +731,15 @@ func TestSeekRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SeekRecord: %v", err)
 	}
+	recLooper(2)
 
-	for i := 2; i < len(recs.records); i++ {
-		rec, err := r.Next()
-		if err != nil {
-			t.Fatalf("Next: %v", err)
-		}
-
-		rData, _ := ioutil.ReadAll(rec)
-		if !bytes.Equal(rData, recs.records[i]) {
-			t.Fatalf("Unexpected output in record #%d's data, got %v want %v", i, rData, recs.records[i])
-		}
+	// Seek to an invalid chunk boundary. Should result in an error upon calling r.Next.
+	err = r.SeekRecord(blockSize + 3)
+	if err != nil {
+		t.Fatalf("Seeking to an invalid chunk boundary isn't an error")
+	}
+	if _, err = r.Next(); err != nil {
+		t.Fatalf("Expected an error jumping to an invalid chunk boundary")
 	}
 }
 
@@ -770,10 +760,10 @@ func TestLastRecordOffset(t *testing.T) {
 		t.Fatalf("makeTestRecords: %v", err)
 	}
 
-	correctOffsets := []int64{0, 98332, 131072, 163840, 196608}
-	for i := range recs.offsets {
-		if recs.offsets[i] != correctOffsets[i] {
-			t.Fatalf("Record written at offset %d, wanted it at %d", recs.offsets[i], correctOffsets[i])
+	wants := []int64{0, 98332, 131072, 163840, 196608}
+	for i, got := range recs.offsets {
+		if want := wants[i]; got != want {
+			t.Errorf("record #%d: got %d, want %d", i, got, want)
 		}
 	}
 }

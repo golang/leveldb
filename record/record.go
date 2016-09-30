@@ -73,7 +73,7 @@
 // The wire format allows for limited recovery in the face of data corruption:
 // on a format error (such as a checksum mismatch), the reader moves to the
 // next block and looks for the next full or first chunk.
-package record // import "github.com/golang/leveldb/record"
+package record
 
 // The C++ Level-DB code calls this the log, but it has been renamed to record
 // to avoid clashing with the standard log package, and because it is generally
@@ -83,7 +83,6 @@ package record // import "github.com/golang/leveldb/record"
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/golang/leveldb/crc"
@@ -98,8 +97,9 @@ const (
 )
 
 const (
-	blockSize  = 32 * 1024
-	headerSize = 7
+	blockSize     = 32 * 1024
+	blockSizeMask = blockSize - 1
+	headerSize    = 7
 )
 
 var (
@@ -239,21 +239,21 @@ func (r *Reader) Recover() {
 	return
 }
 
-// SeekRecord seeks in the underlying io.Reader such that calling r.Next returns the record whose
-// first chunk header starts at the given offset in the underlying io.Reader. Its behavior is
-// undefined if the argument given is not such an offset, as the bytes at that offset may
-// coincidentally appear to be a valid header. The offset is always relative to the start of the
-// io.Reader, thus negative values result in an error.
-
-// It returns ErrNotAnIOSeeker if the underlying io.Reader does not also implement io.Seeker.
+// SeekRecord seeks in the underlying io.Reader such that calling r.Next returns
+// the record whose first chunk header starts at the given offset in the
+// underlying io.Reader. If there is an unrecovered error, the caller should
+// call Recover before calling SeekRecord. SeekRecord will clear the pending
+// error. Its behavior is undefined if the argument given is not such an offset,
+// as the bytes at that offset may coincidentally appear to be a valid header.
+// The offset is always relative to the start of the io.Reader, thus negative
+// values result in an error.
+//
+// It returns ErrNotAnIOSeeker if the underlying io.Reader does not also
+// implement io.Seeker.
 func (r *Reader) SeekRecord(offset int64) error {
 	r.seq++
 	if r.err != nil {
 		return r.err
-	}
-
-	if offset < 0 {
-		return fmt.Errorf("leveldb/record: cannot seek to a negative offset: %d", offset)
 	}
 
 	s, ok := r.r.(io.Seeker)
@@ -262,16 +262,14 @@ func (r *Reader) SeekRecord(offset int64) error {
 	}
 
 	// Only seek to an exact block offset.
-	c := int(offset % blockSize)
-	b := offset - int64(c)
-	_, r.err = s.Seek(b, io.SeekStart)
-	if r.err != nil {
+	c := int(offset & blockSizeMask)
+	if _, r.err = s.Seek(offset &^ blockSizeMask, io.SeekStart); r.err != nil {
 		return r.err
 	}
 
 	// Clear the state of the internal reader.
 	r.i, r.j, r.n = 0, 0, 0
-	r.started, r.last = false, false
+	r.recovering, r.started, r.last = false, false, false
 	if r.err = r.nextChunk(false); r.err != nil {
 		return r.err
 	}
@@ -323,6 +321,16 @@ type Writer struct {
 	// buf[:written] has already been written to w.
 	// written is zero unless Flush has been called.
 	written int
+	// baseOffset is the base offset in w at which writing started. If
+	// w implements io.Seeker, it's relative to the start of w, 0 otherwise.
+	baseOffset int64
+	// blockNumber is the zero based block number currently represented by buf.
+	blockNumber int64
+	// lastRecordOffset is the offset in w at which that the last record was
+	// written (including chunk header). It is a relative offset to
+	// baseOffset, thus the absolute offset of the last record is baseOffset +
+	// lastRecordOffset.
+	lastRecordOffset int64
 	// first is whether the current chunk is the first chunk of the record.
 	first bool
 	// pending is whether a chunk is buffered but not yet written.
@@ -331,15 +339,6 @@ type Writer struct {
 	err error
 	// buf is the buffer.
 	buf [blockSize]byte
-	// bo is the base offset in io.Writer at which writing started. If
-	// io.Writer implements io.Seeker, it's relative to the start of the
-	// io.Writer, 0 otherwise.
-	bo int64
-	// bn is the zero based block number currently represented by buf.
-	bn int64
-	// lro is the offset in io.Writer at which that the last record was
-	// written (including chunk header).
-	lro int64
 }
 
 // NewWriter returns a new Writer.
@@ -354,9 +353,9 @@ func NewWriter(w io.Writer) *Writer {
 		}
 	}
 	return &Writer{
-		w:  w,
-		f:  f,
-		bo: o,
+		w:          w,
+		f:          f,
+		baseOffset: o,
 	}
 }
 
@@ -389,7 +388,7 @@ func (w *Writer) writeBlock() {
 	w.i = 0
 	w.j = headerSize
 	w.written = 0
-	w.bn += 1
+	w.blockNumber++
 }
 
 // writePending finishes the current record and writes the buffer to the
@@ -460,15 +459,20 @@ func (w *Writer) Next() (io.Writer, error) {
 	return singleWriter{w, w.seq}, nil
 }
 
-// LastRecordOffset returns the offset in the underlying io.Writer that the last record was written
-// to (inclusive of any chunk headers). Note that if the io.Writer also implements io.Seeker, the
-// offset is relative to the absolute beginning of whatever object the io.Writer is backed by.
-// Otherwise the initial offset is simply 0.
+// LastRecordOffset returns the offset in the underlying io.Writer of the last
+// record so far - the one created by the most recent Next call. It is the
+// offset of the first chunk header, suitable to pass to Reader.SeekRecord.
+//
+// If that io.Writer also implements io.Seeker, the return value is an absolute
+// offset, in the sense of io.SeekStart, regardless of whether the io.Writer
+// was initially at the zero position when passed to NewWriter. Otherwise, the
+// return value is a relative offset, being the number of bytes written between
+// the NewWriter call and any records written prior to the last record.
 func (w *Writer) LastRecordOffset() (int64, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	return w.lro, nil
+	return w.lastRecordOffset, nil
 }
 
 type singleWriter struct {
@@ -484,7 +488,7 @@ func (x singleWriter) Write(p []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	w.lro = w.bo + (w.bn * blockSize) + int64(w.i)
+	w.lastRecordOffset = w.baseOffset + w.blockNumber*blockSize + int64(w.i)
 	n0 := len(p)
 	for len(p) > 0 {
 		// Write a block, if it is full.
