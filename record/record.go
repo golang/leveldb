@@ -73,7 +73,7 @@
 // The wire format allows for limited recovery in the face of data corruption:
 // on a format error (such as a checksum mismatch), the reader moves to the
 // next block and looks for the next full or first chunk.
-package record // import "github.com/golang/leveldb/record"
+package record // //import "github.com/golang/leveldb/record"
 
 // The C++ Level-DB code calls this the log, but it has been renamed to record
 // to avoid clashing with the standard log package, and because it is generally
@@ -465,6 +465,7 @@ func (w *Writer) Next() (io.Writer, error) {
 			return nil, w.err
 		}
 	}
+	w.lastRecordOffset = w.baseOffset + w.blockNumber*blockSize + int64(w.i)
 	w.first = true
 	w.pending = true
 	return singleWriter{w, w.seq}, nil
@@ -505,7 +506,6 @@ func (x singleWriter) Write(p []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	w.lastRecordOffset = w.baseOffset + w.blockNumber*blockSize + int64(w.i)
 	n0 := len(p)
 	for len(p) > 0 {
 		// Write a block, if it is full.

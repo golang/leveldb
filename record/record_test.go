@@ -16,6 +16,13 @@ import (
 	"testing"
 )
 
+func intMin(a, b int) int {
+	if a > b {
+		return b
+	}
+	return a
+}
+
 func short(s string) string {
 	if len(s) < 64 {
 		return s
@@ -342,9 +349,14 @@ func makeTestRecords(recordLengths ...int) (*testRecords, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err = wRec.Write(rec); err != nil {
-			return nil, err
+		// Don't write records in single calls to Write. Write in multiple cSize chunks.
+		const cSize = 8
+		for j := 0; j < len(rec); j += cSize {
+			if _, err := wRec.Write(rec[j:intMin(j+cSize, len(rec))]); err != nil {
+				return nil, err
+			}
 		}
+
 		ret.offsets[i], err = w.LastRecordOffset()
 		if err != nil {
 			return nil, err
