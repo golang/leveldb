@@ -361,6 +361,10 @@ func makeTestRecords(recordLengths ...int) (*testRecords, error) {
 		if err != nil {
 			return nil, err
 		}
+		ret.offsets[i], err = w.LastRecordOffset()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := w.Close(); err != nil {
@@ -783,7 +787,7 @@ func TestNoLastRecordOffset(t *testing.T) {
 	}
 
 	if _, err := w.LastRecordOffset(); err != ErrNoLastRecord {
-		t.Fatal("LastRecordOffset: got: %v, want ErrNoLastRecord", err)
+		t.Fatalf("LastRecordOffset: got: %v, want ErrNoLastRecord", err)
 	}
 
 	writer, err := w.Next()
